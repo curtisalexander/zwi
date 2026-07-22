@@ -43,7 +43,7 @@ struct Cli {
     threads: usize,
 
     /// Deflate compression level: 1 is fastest, 9 is smallest
-    #[arg(long, value_parser = clap::value_parser!(i64).range(1..=9), default_value_t = 3)]
+    #[arg(long, value_parser = clap::value_parser!(i64).range(1..=9), default_value_t = 6)]
     compression_level: i64,
 
     /// Maximum memory used for parallel file buffers, in MiB
@@ -172,12 +172,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let output_absolute = absolute_path(&output_path)?;
 
     let scan = spinner("Scanning files", cli.quiet);
-    let entries = discover_entries(
-        &dir,
-        ignore_file.unwrap_or(&gitignore_path),
-        &output_absolute,
-        cli.threads,
-    )?;
+    let entries = discover_entries(&dir, ignore_file, &output_absolute, cli.threads)?;
     let file_count = entries.iter().filter(|entry| !entry.is_dir).count();
     let total_bytes: u64 = entries.iter().map(|entry| entry.size).sum();
     scan.finish_and_clear();
@@ -237,18 +232,26 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
 fn discover_entries(
     dir: &Path,
-    ignore_file: &Path,
+    custom_ignore_file: Option<&Path>,
     output_absolute: &Path,
     threads: usize,
 ) -> Result<Vec<ArchiveEntry>, Box<dyn std::error::Error>> {
     let mut builder = WalkBuilder::new(dir);
     builder
         .hidden(false)
+        .parents(false)
         .git_global(false)
-        .git_ignore(false)
         .git_exclude(false)
-        .threads(threads)
-        .add_ignore(ignore_file);
+        .threads(threads);
+
+    if let Some(ignore_file) = custom_ignore_file {
+        builder.git_ignore(false).add_ignore(ignore_file);
+    } else {
+        // Discover .gitignore files while descending so that each file's
+        // patterns are scoped to its directory. zwi does not require the
+        // input directory to be part of a Git repository.
+        builder.git_ignore(true).require_git(false);
+    }
 
     let entries = std::sync::Mutex::new(Vec::new());
     let errors = std::sync::Mutex::new(Vec::new());

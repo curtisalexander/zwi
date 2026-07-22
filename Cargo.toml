@@ -1,6 +1,6 @@
 [package]
 name = "zwi"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Zip with ignore — create zip archives that respect .gitignore rules"
 license = "MIT"

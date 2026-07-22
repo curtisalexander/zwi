@@ -100,6 +100,47 @@ fn test_basic_zip_with_gitignore() {
 }
 
 #[test]
+fn test_nested_gitignore_files_are_respected_with_directory_scope() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join("project");
+    fs::create_dir_all(&dir).unwrap();
+
+    create_file(&dir, ".gitignore", "*.tmp\n");
+    create_file(
+        &dir,
+        "src/.gitignore",
+        "!keep.tmp\n/local-only.txt\n*.generated\n",
+    );
+    create_file(&dir, "root.tmp", "ignored by the root rules");
+    create_file(&dir, "src/drop.tmp", "also ignored by the root rules");
+    create_file(&dir, "src/keep.tmp", "restored by the nested rules");
+    create_file(&dir, "src/local-only.txt", "ignored only below src");
+    create_file(&dir, "src/nested/output.generated", "nested rule inherited");
+    create_file(&dir, "docs/local-only.txt", "nested rule must not leak");
+    create_file(&dir, "docs/output.generated", "nested rule must not leak");
+
+    let output_zip = tmp.path().join("output.zip");
+
+    zwi_cmd()
+        .arg(&dir)
+        .arg("-o")
+        .arg(&output_zip)
+        .assert()
+        .success();
+
+    let entries = zip_entries(&output_zip);
+
+    assert!(entries.contains(&"src/.gitignore".to_string()));
+    assert!(entries.contains(&"src/keep.tmp".to_string()));
+    assert!(entries.contains(&"docs/local-only.txt".to_string()));
+    assert!(entries.contains(&"docs/output.generated".to_string()));
+    assert!(!entries.contains(&"root.tmp".to_string()));
+    assert!(!entries.contains(&"src/drop.tmp".to_string()));
+    assert!(!entries.contains(&"src/local-only.txt".to_string()));
+    assert!(!entries.contains(&"src/nested/output.generated".to_string()));
+}
+
+#[test]
 fn test_custom_ignore_file() {
     let tmp = TempDir::new().unwrap();
     let dir = tmp.path().join("project");
@@ -186,6 +227,7 @@ fn test_help_flag() {
         .success()
         .stdout(predicate::str::contains("zip with ignore"))
         .stdout(predicate::str::contains("--ignore-file"))
+        .stdout(predicate::str::contains("[default: 6]"))
         .stdout(predicate::str::contains("--output"));
 }
 
@@ -195,7 +237,7 @@ fn test_version_flag() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("zwi 0.2.0"));
+        .stdout(predicate::str::contains("zwi 0.3.0"));
 }
 
 #[test]

@@ -21,14 +21,14 @@ Install as a tool:
 ```bash
 uv tool install zwi \
   --no-index \
-  --find-links https://github.com/curtisalexander/zwi/releases/expanded_assets/v0.2.0
+  --find-links https://github.com/curtisalexander/zwi/releases/expanded_assets/v0.3.0
 ```
 
 Or run directly without installing:
 
 ```bash
 uvx --no-index --from zwi \
-  --find-links https://github.com/curtisalexander/zwi/releases/expanded_assets/v0.2.0 \
+  --find-links https://github.com/curtisalexander/zwi/releases/expanded_assets/v0.3.0 \
   zwi .
 ```
 
@@ -37,7 +37,7 @@ Or install into a virtual environment:
 ```bash
 uv pip install zwi \
   --no-index \
-  --find-links https://github.com/curtisalexander/zwi/releases/expanded_assets/v0.2.0
+  --find-links https://github.com/curtisalexander/zwi/releases/expanded_assets/v0.3.0
 ```
 
 ### From source
@@ -61,7 +61,7 @@ zwi [OPTIONS] <DIRECTORY>
 - `-o, --output <PATH>` — Output zip file path (default: `<directory-name>.zip`)
 - `-i, --ignore-file <PATH>` — Path to a custom ignore file (instead of `.gitignore`)
 - `-j, --threads <COUNT>` — Files to compress concurrently (default: up to 8 logical CPUs)
-- `--compression-level <1-9>` — Deflate level; 1 is fastest, 9 is smallest (default: 3)
+- `--compression-level <1-9>` — Deflate level; 1 is fastest, 9 is smallest (default: 6)
 - `--memory-limit <MIB>` — Maximum memory for parallel buffers (default: 256)
 - `-q, --quiet` — Suppress status and summary output
 - `-h, --help` — Print help
@@ -104,8 +104,8 @@ in `Cargo.toml`, `pyproject.toml`, `python/zwi/__init__.py`, and this README, co
 and push the change, then create and push the matching tag:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 GitHub Actions verifies that the tag matches `Cargo.toml`, builds all platform
