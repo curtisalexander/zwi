@@ -667,9 +667,11 @@ fn test_archive_extracts_with_powershell_expand_archive() {
         .arg("-NoProfile")
         .arg("-NonInteractive")
         .arg("-Command")
-        .arg("Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1]")
-        .arg(&output_zip)
-        .arg(&extracted)
+        .arg(
+            "Expand-Archive -LiteralPath $env:ZWI_TEST_ARCHIVE -DestinationPath $env:ZWI_TEST_DESTINATION",
+        )
+        .env("ZWI_TEST_ARCHIVE", &output_zip)
+        .env("ZWI_TEST_DESTINATION", &extracted)
         .assert()
         .success();
     assert_eq!(
