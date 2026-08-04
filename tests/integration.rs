@@ -570,13 +570,91 @@ fn test_compression_failure_preserves_previous_valid_archive() {
 
 #[cfg(unix)]
 #[test]
-fn test_backslashes_are_normalized_for_windows_readers() {
+fn test_windows_incompatible_names_are_rejected() {
     let tmp = TempDir::new().unwrap();
     let dir = tmp.path().join("project");
     fs::create_dir_all(&dir).unwrap();
     create_file(&dir, ".gitignore", "");
-    create_file(&dir, "folder\\file.txt", "portable path");
+    create_file(&dir, "folder\\file.txt", "not a portable path");
     let output_zip = tmp.path().join("output.zip");
+
+    zwi_cmd()
+        .arg(&dir)
+        .arg("-o")
+        .arg(&output_zip)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be extracted on Windows"));
+
+    assert!(!output_zip.exists());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_windows_case_insensitive_name_collisions_are_rejected() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join("project");
+    fs::create_dir_all(&dir).unwrap();
+    create_file(&dir, ".gitignore", "");
+    create_file(&dir, "README.md", "upper");
+    create_file(&dir, "readme.md", "lower");
+    let output_zip = tmp.path().join("output.zip");
+
+    zwi_cmd()
+        .arg(&dir)
+        .arg("-o")
+        .arg(&output_zip)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "resolve to the same path on Windows",
+        ));
+
+    assert!(!output_zip.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn test_archive_passes_external_unzip_validation() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join("project");
+    fs::create_dir_all(&dir).unwrap();
+    create_file(&dir, ".gitignore", "");
+    for index in 0..20 {
+        create_file(
+            &dir,
+            &format!("nested/file-{index}.txt"),
+            &format!("contents {index}"),
+        );
+    }
+    let output_zip = tmp.path().join("output.zip");
+
+    zwi_cmd()
+        .arg(&dir)
+        .arg("-o")
+        .arg(&output_zip)
+        .arg("--threads")
+        .arg("4")
+        .assert()
+        .success();
+
+    Command::new("unzip")
+        .arg("-t")
+        .arg(&output_zip)
+        .assert()
+        .success();
+}
+
+#[cfg(windows)]
+#[test]
+fn test_archive_extracts_with_powershell_expand_archive() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join("project");
+    fs::create_dir_all(&dir).unwrap();
+    create_file(&dir, ".gitignore", "");
+    create_file(&dir, "nested/file.txt", "Windows-compatible content");
+    let output_zip = tmp.path().join("output.zip");
+    let extracted = tmp.path().join("extracted");
 
     zwi_cmd()
         .arg(&dir)
@@ -585,9 +663,17 @@ fn test_backslashes_are_normalized_for_windows_readers() {
         .assert()
         .success();
 
-    validate_all_zip_entries(&output_zip);
+    Command::new("powershell.exe")
+        .arg("-NoProfile")
+        .arg("-NonInteractive")
+        .arg("-Command")
+        .arg("Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1]")
+        .arg(&output_zip)
+        .arg(&extracted)
+        .assert()
+        .success();
     assert_eq!(
-        zip_file_content(&output_zip, "folder/file.txt"),
-        "portable path"
+        fs::read_to_string(extracted.join("nested/file.txt")).unwrap(),
+        "Windows-compatible content"
     );
 }

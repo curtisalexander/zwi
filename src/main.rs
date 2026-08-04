@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Cursor, IsTerminal, Read, Seek, Write};
 use std::path::{Path, PathBuf};
@@ -281,9 +282,21 @@ fn discover_entries(
                     return WalkState::Continue;
                 }
             };
-            let name = relative
-                .to_string_lossy()
-                .replace(['\\', std::path::MAIN_SEPARATOR], "/");
+            let Some(relative_name) = relative.to_str() else {
+                errors.lock().unwrap().push(format!(
+                    "'{}' has a non-Unicode name that cannot be stored portably in a ZIP archive",
+                    path.display()
+                ));
+                return WalkState::Continue;
+            };
+            let name = relative_name.replace(std::path::MAIN_SEPARATOR, "/");
+            if let Some(reason) = windows_portability_error(&name) {
+                errors.lock().unwrap().push(format!(
+                    "'{}' cannot be extracted on Windows: {reason}",
+                    path.display()
+                ));
+                return WalkState::Continue;
+            }
             let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
             let size = if is_dir {
                 0
@@ -312,7 +325,86 @@ fn discover_entries(
     }
     let mut entries = entries.into_inner().unwrap();
     entries.sort_unstable_by(|left, right| left.name.cmp(&right.name));
+    let mut windows_names = HashMap::with_capacity(entries.len());
+    for entry in &entries {
+        let windows_name = windows_case_key(&entry.name);
+        if let Some(existing) = windows_names.insert(windows_name, entry.name.as_str())
+            && existing != entry.name
+        {
+            return Err(format!(
+                "'{}' and '{}' resolve to the same path on Windows",
+                existing, entry.name
+            )
+            .into());
+        }
+    }
     Ok(entries)
+}
+
+fn windows_case_key(name: &str) -> String {
+    // NTFS compares names with a one-code-point uppercase table rather than
+    // Unicode's full case folding. Preserve characters such as ß whose full
+    // uppercase form expands, while still folding one-to-one pairs such as
+    // Greek final sigma and sigma.
+    name.chars()
+        .map(|character| {
+            let mut uppercase = character.to_uppercase();
+            let first = uppercase.next().unwrap_or(character);
+            if uppercase.next().is_none() {
+                first
+            } else {
+                character
+            }
+        })
+        .collect()
+}
+
+fn windows_portability_error(name: &str) -> Option<String> {
+    for component in name.split('/') {
+        if component.encode_utf16().count() > 255 {
+            return Some(format!(
+                "path component {component:?} exceeds Windows' 255-character limit"
+            ));
+        }
+        if component.ends_with([' ', '.']) {
+            return Some(format!(
+                "path component {component:?} ends with a space or period"
+            ));
+        }
+        if component
+            .chars()
+            .any(|character| character <= '\u{1f}' || r#"<>:"\|?*"#.contains(character))
+        {
+            return Some(format!(
+                "path component {component:?} contains a character forbidden by Windows"
+            ));
+        }
+
+        let stem = component
+            .split('.')
+            .next()
+            .unwrap_or(component)
+            .to_uppercase();
+        let numbered_device = stem
+            .strip_prefix("COM")
+            .or_else(|| stem.strip_prefix("LPT"))
+            .is_some_and(|number| {
+                matches!(
+                    number,
+                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                )
+            });
+        if matches!(
+            stem.as_str(),
+            "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+        ) || numbered_device
+        {
+            return Some(format!(
+                "path component {component:?} is a reserved Windows device name"
+            ));
+        }
+    }
+    None
 }
 
 fn compress_pipeline<W: Write + Seek>(
@@ -527,6 +619,25 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_incompatible_names_are_detected() {
+        assert!(windows_portability_error("src/main.rs").is_none());
+        assert!(windows_portability_error("café/東京-🚀.txt").is_none());
+        assert!(windows_portability_error("logs/build:debug.txt").is_some());
+        assert!(windows_portability_error("CON.txt").is_some());
+        assert!(windows_portability_error("nested/file. ").is_some());
+        assert!(windows_portability_error("COM¹.log").is_some());
+    }
+
+    #[test]
+    fn windows_case_collisions_follow_one_to_one_uppercase_rules() {
+        assert_eq!(windows_case_key("xς.txt"), windows_case_key("xσ.txt"));
+        assert_ne!(
+            windows_case_key("straße.txt"),
+            windows_case_key("STRASSE.txt")
+        );
+    }
 
     #[test]
     fn zip64_is_enabled_before_a_file_can_cross_the_32_bit_limit() {
